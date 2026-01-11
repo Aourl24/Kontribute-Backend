@@ -10,7 +10,7 @@ class Collection(models.Model):
     ]
    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    slug = models.SlugField(unique=True, max_length=100)
+    slug = models.SlugField(unique=True, max_length=100,blank=True)
    
     # Collection details
     title = models.CharField(max_length=200)
@@ -38,7 +38,14 @@ class Collection(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
    
     # Paystack
-    paystack_subaccount = models.CharField(max_length=100, blank=True)
+    paystack_subaccount = models.CharField(max_length=100, blank=True,null=True)
+    
+     # Add these for manual payments:
+    organizer_bank_name = models.CharField(max_length=100, blank=True)
+    organizer_account_number = models.CharField(max_length=20, blank=True)
+    organizer_account_name = models.CharField(max_length=100, blank=True)
+
+
    
     def __str__(self):
         return self.title
@@ -81,6 +88,19 @@ class Contributor(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
+    
+    payment_method = models.CharField(
+        max_length=20,
+        default='bank_transfer',
+        choices=[
+            ('bank_transfer', 'Bank Transfer'),
+            ('card', 'Card'),
+            ('ussd', 'USSD')
+        ]
+    )
+    payment_proof = models.TextField(blank=True)
+    verified_by = models.CharField(max_length=100, blank=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
    
     def __str__(self):
         return f"{self.name} - {self.collection.title}"

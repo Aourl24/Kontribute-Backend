@@ -1,0 +1,10 @@
+POST /api/collections/  # Create new collection
+GET  /api/collections/{slug}/  #Get collection details
+POST   /api/collections/{slug}/contribute/  # Add contributor + initiate payment
+GET    /api/collections/{slug}/dashboard/   # Organizer dashboard
+POST   /api/collections/{slug}/withdraw/    # Request withdrawal
+POST   /api/collections/{slug}/remind/      # Send reminders
+
+POST   /api/webhooks/paystack/    # Paystack webhook (payment confirmation)
+
+GET    /api/receipts/{id}/        # Get receipt PDF
