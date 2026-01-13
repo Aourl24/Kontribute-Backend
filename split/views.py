@@ -15,7 +15,7 @@ import uuid
 from .models import Collection, Contributor, Transaction
 
 website_url = "http://127.0.0.1:8000"
-
+website_url = "http://10.42.134.92:8000"
 
 def response(status_bool, message, data=None, code=None, errors=None, **others):
     """Helper function for consistent API responses"""
@@ -72,7 +72,7 @@ def create_collections(request):
             "Collection Created Successfully",
             data=response_serializer.data,
             code=status.HTTP_201_CREATED,
-            collection_url=f"{website_url}/{collection.slug}"
+            collection_url=f"{website_url}/collections/{collection.slug}"
         )
         
     except Exception as e:
