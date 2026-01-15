@@ -95,9 +95,12 @@ def get_collection(request, slug):
         total_collected = collection.contributors.filter(
             payment_status='paid'
         ).aggregate(total=Sum('amount_paid'))['total'] or 0
-        
         paid_count = collection.contributors.filter(payment_status='paid').count()
         pending_count = collection.contributors.filter(payment_status='pending').count()
+        if collection.total_amount:
+          completion_percentage = round( (total_collected / collection.total_amount * 100) if collection.total_amount > 0 else 0, 2)
+        else:
+          completion_percentage = 100
         
         return response(
             True,
@@ -109,18 +112,14 @@ def get_collection(request, slug):
                     'paid_count': paid_count,
                     'pending_count': pending_count,
                     'total_contributors': paid_count + pending_count,
-                    'completion_percentage': round(
-                        (total_collected / collection.total_amount * 100) 
-                        if collection.total_amount > 0 else 0, 
-                        2
-                    )
+                    'completion_percentage': completion_percentage
                 }
             }
         )
     except Exception as e:
         return response(
             False,
-            "Collection not found",
+            "Error fetching Collection",
             errors=str(e),
             code=status.HTTP_404_NOT_FOUND
         )

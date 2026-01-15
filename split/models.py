@@ -15,9 +15,10 @@ class Collection(models.Model):
     # Collection details
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2,null=True,blank=True)
     amount_per_person = models.DecimalField(max_digits=12, decimal_places=2,null=True,blank=True)
     number_of_people = models.IntegerField(null=True,blank=True)
+    #target_amount = models.DecimalField(max_digits=12, decimal_places=2,null=True,blank=True)
    
     # Organizer details
     organizer_name = models.CharField(max_length=100)
