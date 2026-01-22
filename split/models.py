@@ -78,7 +78,7 @@ class Contributor(models.Model):
     email = models.EmailField(blank=True)
    
     # Payment details
-    amount_owed = models.DecimalField(max_digits=12, decimal_places=2)
+    amount_owed = models.DecimalField(max_digits=12, decimal_places=2,blank=True,null=True)
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     payment_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
    

@@ -161,6 +161,9 @@ def make_contribution(request, slug):
         
         # Validate input data
         required_fields = ['name', 'phone']
+        if not collection.amount_per_person:
+          required_fields.append("amount")
+          
         for field in required_fields:
             if field not in request.data:
                 return response(
@@ -169,6 +172,7 @@ def make_contribution(request, slug):
                     code=status.HTTP_400_BAD_REQUEST
                 )
         
+        amount_to_be_paid = collection.amount_per_person if collection.amount_per_person else request.data["amount"]
         # Check for duplicate contribution (same phone number)
         existing_contributor = Contributor.objects.filter(
             collection=collection,
@@ -195,7 +199,7 @@ def make_contribution(request, slug):
                             'account_number': collection.organizer_account_number,
                             'account_name': collection.organizer_account_name
                         },
-                        'amount': float(collection.amount_per_person),
+                        'amount': existing_contributor.amount_owed,
                         'status': 'pending'
                     }
                 )
@@ -203,12 +207,13 @@ def make_contribution(request, slug):
         # Create contributor record
         payment_reference = f"KTR-{uuid.uuid4().hex[:8].upper()}"
         
+        print(amount_to_be_paid)
         contributor = Contributor.objects.create(
             collection=collection,
             name=request.data['name'],
             phone=request.data['phone'],
             email=request.data.get('email', ''),
-            amount_owed=collection.amount_per_person,
+            amount_owed=amount_to_be_paid,
             amount_paid=0,
             payment_status='pending',
             payment_method='bank_transfer',
@@ -220,10 +225,11 @@ def make_contribution(request, slug):
             collection=collection,
             contributor=contributor,
             transaction_type='payment',
-            amount=collection.amount_per_person,
+            amount=amount_to_be_paid,
             status='pending',
             reference=payment_reference
         )
+        print("about to take off")
         
         # Return payment instructions
         return response(
@@ -237,9 +243,9 @@ def make_contribution(request, slug):
                     'account_number': collection.organizer_account_number or 'Not provided',
                     'account_name': collection.organizer_account_name or 'Not provided'
                 },
-                'amount': float(collection.amount_per_person),
+                'amount': float(amount_to_be_paid),
                 'instructions': [
-                    f"1. Transfer exactly ₦{collection.amount_per_person:,.2f} to the account above",
+                    f"1. Transfer exactly ₦{amount_to_be_paid} to the account above",
                     f"2. Use reference: {payment_reference}",
                     "3. Keep your bank receipt/reference",
                     "4. Confirmation may take a few minutes"
@@ -375,7 +381,7 @@ def get_dashboard(request, slug):
                     'title': collection.title,
                     'slug': collection.slug,
                     'total_amount': float(collection.total_amount),
-                    'amount_per_person': float(collection.amount_per_person),
+                    'amount_per_person': float(collection.amount_per_person) if collection.amount_per_person else "Flexible amount",
                     'number_of_people': collection.number_of_people,
                     'status': collection.status,
                     'deadline': collection.deadline.isoformat() if collection.deadline else None,
