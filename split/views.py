@@ -13,6 +13,7 @@ from .serializers import (
 from django.utils.text import slugify
 import uuid
 from .models import Collection, Contributor, Transaction
+from .email_function import send_organizer_notification
 
 website_url = "http://127.0.0.1:8000"
 website_url = "http://10.42.134.92:8000"
@@ -230,6 +231,13 @@ def make_contribution(request, slug):
             reference=payment_reference
         )
         print("about to take off")
+        
+        # Send email notification to organizer
+        try:
+            send_organizer_notification(collection, contributor, amount_to_be_paid, payment_reference)
+        except Exception as email_error:
+            # Log the error but don't fail the contribution
+            print(f"Email notification failed: {str(email_error)}")
         
         # Return payment instructions
         return response(

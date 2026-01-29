@@ -56,6 +56,11 @@ class Collection(models.Model):
         return self.contributors.filter(payment_status='paid').aggregate(
             total=models.Sum('amount_paid')
         )['total'] or 0
+        
+    def total_amount_collected(self):
+    return self.contributor_set.filter(payment_status='paid').aggregate(
+        total=models.Sum('amount_paid')
+    )['total'] or 0
    
     @property
     def paid_count(self):
