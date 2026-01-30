@@ -13,7 +13,7 @@ from .serializers import (
 from django.utils.text import slugify
 import uuid
 from .models import Collection, Contributor, Transaction
-from .email_function import send_organizer_notification
+from .email_function import send_organizer_notification,send_dashborad_link
 
 website_url = "http://127.0.0.1:8000"
 website_url = "http://10.42.134.92:8000"
@@ -34,7 +34,7 @@ def response(status_bool, message, data=None, code=None, errors=None, **others):
     }, status=status_code)
 
 
-# ==================== COLLECTION ENDPOINTS ====================
+# COLLECTION ENDPOINTS 
 
 @api_view(['POST'])
 def create_collections(request):
@@ -66,8 +66,16 @@ def create_collections(request):
             status='active'
         )
         
+        token = collection.generate_magic_token()
         response_serializer = CollectionSerializers(collection)
         
+         # Send email notification to organizer
+        try:
+            send_dashborad_link(collection, f"{website_url}/{collection.slug}/dashboard")
+        except Exception as email_error:
+            # Log the error but don't fail the contribution
+            print(f"Email notification failed: {str(email_error)}")
+
         return response(
             True, 
             "Collection Created Successfully",
@@ -126,7 +134,7 @@ def get_collection(request, slug):
         )
 
 
-# ==================== CONTRIBUTION ENDPOINTS ====================
+#CONTRIBUTION ENDPOINTS
 
 @api_view(["POST"])
 def make_contribution(request, slug):
@@ -208,7 +216,6 @@ def make_contribution(request, slug):
         # Create contributor record
         payment_reference = f"KTR-{uuid.uuid4().hex[:8].upper()}"
         
-        print(amount_to_be_paid)
         contributor = Contributor.objects.create(
             collection=collection,
             name=request.data['name'],
@@ -230,7 +237,6 @@ def make_contribution(request, slug):
             status='pending',
             reference=payment_reference
         )
-        print("about to take off")
         
         # Send email notification to organizer
         try:

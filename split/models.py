@@ -1,6 +1,9 @@
 from django.db import models
 import uuid
 from django.utils.text import slugify
+import secrets
+from django.utils import timezone
+from datetime import timedelta
 
 class Collection(models.Model):
     STATUS_CHOICES = [
@@ -23,7 +26,7 @@ class Collection(models.Model):
     # Organizer details
     organizer_name = models.CharField(max_length=100)
     organizer_phone = models.CharField(max_length=20)
-    organizer_email = models.EmailField(blank=True)
+    organizer_email = models.EmailField()
    
     # Withdrawal details
     bank_name = models.CharField(max_length=100, blank=True)
@@ -46,6 +49,9 @@ class Collection(models.Model):
     organizer_account_number = models.CharField(max_length=20, blank=True)
     organizer_account_name = models.CharField(max_length=100, blank=True)
 
+    #Access
+    magic_token = models.CharField(max_length=64,unique=True,blank=True)
+    magic_token_created = models.DateTimeField(null=True,blank=True)
 
    
     def __str__(self):
@@ -57,15 +63,27 @@ class Collection(models.Model):
             total=models.Sum('amount_paid')
         )['total'] or 0
         
-    def total_amount_collected(self):
-    return self.contributor_set.filter(payment_status='paid').aggregate(
-        total=models.Sum('amount_paid')
-    )['total'] or 0
+    # def total_amount_collected(self):
+    #     return self.contributor_set.filter(payment_status='paid').aggregate(
+    #     total=models.Sum('amount_paid')
+    # )['total'] or 0
    
     @property
     def paid_count(self):
         return self.contributors.filter(payment_status='paid').count()
 
+
+    def generate_magic_token(self):
+        self.magic_token = secrets.token_urlsafe(32)
+        self.magic_token_created = timezone.now()
+        self.save()
+        return self.magic_token
+
+    def is_magic_token_valid(self):
+        if not self.magic_token_created:
+            return False
+        expiry = self.magic_token_created + timedelta(days=7)
+        return timezone.now() < expiry
 
 class Contributor(models.Model):
     STATUS_CHOICES = [
