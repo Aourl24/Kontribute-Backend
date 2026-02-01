@@ -11,6 +11,11 @@ class Collection(models.Model):
         ('closed', 'Closed'),
         ('withdrawn', 'Withdrawn'),
     ]
+
+    COLLECTION_TYPE = [
+        ('manual','Manual'),
+        ("automatic","Automatic")
+    ]
    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     slug = models.SlugField(unique=True, max_length=100,blank=True)
@@ -21,7 +26,7 @@ class Collection(models.Model):
     total_amount = models.DecimalField(max_digits=12, decimal_places=2,null=True,blank=True)
     amount_per_person = models.DecimalField(max_digits=12, decimal_places=2,null=True,blank=True)
     number_of_people = models.IntegerField(null=True,blank=True)
-    #target_amount = models.DecimalField(max_digits=12, decimal_places=2,null=True,blank=True)
+    type = models.CharField(max_length=20, choices=COLLECTION_TYPE, default='manual')
    
     # Organizer details
     organizer_name = models.CharField(max_length=100)

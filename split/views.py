@@ -13,10 +13,10 @@ from .serializers import (
 from django.utils.text import slugify
 import uuid
 from .models import Collection, Contributor, Transaction
-from .email_function import send_organizer_notification,send_dashborad_link
+from .email_function import send_organizer_notification,send_dashboard_link
 
 website_url = "http://127.0.0.1:8000"
-website_url = "http://10.42.134.92:8000"
+frontend_url = "http://localhost:3000"
 
 def response(status_bool, message, data=None, code=None, errors=None, **others):
     """Helper function for consistent API responses"""
@@ -71,7 +71,7 @@ def create_collections(request):
         
          # Send email notification to organizer
         try:
-            send_dashborad_link(collection, f"{website_url}/{collection.slug}/dashboard")
+            send_dashboard_link(collection, f"{frontend_url}/{collection.slug}/dashboard")
         except Exception as email_error:
             # Log the error but don't fail the contribution
             print(f"Email notification failed: {str(email_error)}")
@@ -240,7 +240,7 @@ def make_contribution(request, slug):
         
         # Send email notification to organizer
         try:
-            send_organizer_notification(collection, contributor, amount_to_be_paid, payment_reference)
+            send_organizer_notification(collection, contributor, amount_to_be_paid, payment_reference,f"{frontend_url}/{collection.slug}/dashboard")
         except Exception as email_error:
             # Log the error but don't fail the contribution
             print(f"Email notification failed: {str(email_error)}")

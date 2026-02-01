@@ -11,16 +11,17 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-
+from .protect import Protect
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+protect = Protect()
+protect.read()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-su@_su&1(r=arwpcl)lrf-6%@ztlhau5evf^x83-)2y0a2z#g5"
+SECRET_KEY = protect.protect(0)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -131,6 +132,6 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'  # or your email provider
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'louloue0227@gmail.com'
-EMAIL_HOST_PASSWORD = 'Aourl2001'
-DEFAULT_FROM_EMAIL = 'Your Collection App <your-email@gmail.com>'
+EMAIL_HOST_USER = protect.protect(1)
+EMAIL_HOST_PASSWORD = protect.protect(2)
+DEFAULT_FROM_EMAIL = 'Kontribute.com <kontribute.mail@gmail.com>'

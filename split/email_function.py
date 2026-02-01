@@ -3,7 +3,7 @@ from django.conf import settings
 from django.template.loader import render_to_string
 import uuid
 
-def send_organizer_notification(collection, contributor, amount, payment_reference):
+def send_organizer_notification(collection, contributor, amount, payment_reference,verify_link=None):
     """
     Send email notification to collection organizer about new contribution
     """
@@ -42,7 +42,7 @@ Your Collection Management System
     
     # HTML message (optional but recommended)
     html_message = f"""
-    <html>
+q    <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <h2 style="color: #4CAF50;">New Contribution Pending</h2>
             
@@ -63,7 +63,7 @@ Your Collection Management System
             </div>
             
             <p>The contributor has been provided with your bank details to complete the transfer.<br>
-            Please verify the payment once received.</p>
+            Please verify the payment once received.verify here  <p> The dashborad Link <a href="{verify_link}" >"https://{collection.magic_token}"</a>.</p> </p>
             
             <div style="background-color: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;">
                 <h3 style="margin-top: 0;">Collection Summary:</h3>
@@ -92,7 +92,14 @@ Your Collection Management System
     )
 
 
-def send_dashbord_link(collection,link):
+def send_dashboard_link(collection,link):
+    organizer_email = collection.organizer_email  # Adjust based on your model structure
+    
+    if not organizer_email:
+        return  # Skip if organizer has no email
+    
+    subject = f"{collection.title} Collection Created"
+    message = f""" Your Collection has been created successfully , to access the dashboard link, kindly use this link {link} """
     html_message = f"""
     <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -100,7 +107,7 @@ def send_dashbord_link(collection,link):
             
             <p>Hello,</p>
             
-            <p> The dashborad Link <a href="{link}" >"{uuid.uuid4().hex[:25]}"</a>.</p>
+            <p> Your Collection has been created successfully , to access the dashboard link, kindly use this link <a href="{link}" >"https://{collection.magic_token}"</a>.</p>
     </body>
     </html>
     """ 
