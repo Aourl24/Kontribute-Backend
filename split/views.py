@@ -13,10 +13,20 @@ from .serializers import (
 from django.utils.text import slugify
 import uuid
 from .models import Collection, Contributor, Transaction
-from .email_function import send_organizer_notification,send_dashboard_link
+from .email_function import send_organizer_notification, send_dashboard_link
+from .paystack_service import PaystackService
+from .paystack_utils import (
+    generate_payment_reference,
+    validate_paystack_response,
+    create_payment_metadata,
+    parse_paystack_webhook_event,
+    kobo_to_naira
+)
+import json
 
 website_url = "http://127.0.0.1:8000"
 frontend_url = "http://localhost:3000"
+
 
 def response(status_bool, message, data=None, code=None, errors=None, **others):
     """Helper function for consistent API responses"""
@@ -59,21 +69,23 @@ def create_collections(request):
                 validated_data['amount_per_person'] * 
                 validated_data['number_of_people']
             )
+
+        organizer_account_number = validated_data.get("organizer_account_number")
         
         collection = Collection.objects.create(
             **validated_data,
             slug=unique_slug,
-            status='active'
+            status='active',
+            type = "manual" if organizer_account_number else "automatic"
         )
         
         token = collection.generate_magic_token()
         response_serializer = CollectionSerializers(collection)
         
-         # Send email notification to organizer
+        # Send email notification to organizer
         try:
             send_dashboard_link(collection, f"{frontend_url}/{collection.slug}/dashboard")
         except Exception as email_error:
-            # Log the error but don't fail the contribution
             print(f"Email notification failed: {str(email_error)}")
 
         return response(
@@ -134,7 +146,344 @@ def get_collection(request, slug):
         )
 
 
-#CONTRIBUTION ENDPOINTS
+# ==================== AUTOMATIC PAYMENT ENDPOINTS (PAYSTACK) ====================
+
+@api_view(['POST'])
+def make_automatic_contribution(request, slug):
+    """
+    Create contributor and initialize Paystack payment - Automatic Payment Version
+    
+    Expected payload:
+    {
+        "name": "John Doe",
+        "phone": "08012345678",
+        "email": "john@email.com"
+    }
+    """
+    try:
+        # Get collection
+        collection = get_object_or_404(Collection, slug=slug)
+        
+        # Verify this is an automatic collection
+        if collection.type != 'automatic':
+            return response(
+                False,
+                "This collection uses manual payment. Please use the manual payment endpoint.",
+                code=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if collection is still active
+        if collection.status != 'active':
+            return response(
+                False,
+                "This collection is no longer accepting contributions",
+                code=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if deadline passed
+        if collection.deadline and collection.deadline < timezone.now():
+            return response(
+                False,
+                "This collection deadline has passed",
+                code=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate required fields
+        required_fields = ['name', 'phone', 'email']
+        if not collection.amount_per_person:
+            required_fields.append('amount')
+            
+        for field in required_fields:
+            if field not in request.data:
+                return response(
+                    False,
+                    f"Missing required field: {field}",
+                    code=status.HTTP_400_BAD_REQUEST
+                )
+        
+        # Validate email format
+        email = request.data['email']
+        if not email or '@' not in email:
+            return response(
+                False,
+                "Valid email address is required for automatic payments",
+                code=status.HTTP_400_BAD_REQUEST
+            )
+        
+        amount_to_be_paid = collection.amount_per_person if collection.amount_per_person else request.data["amount"]
+        
+        # Check for duplicate contribution
+        existing_contributor = Contributor.objects.filter(
+            collection=collection,
+            phone=request.data['phone']
+        ).first()
+        
+        if existing_contributor:
+            if existing_contributor.payment_status == 'paid':
+                return response(
+                    False,
+                    "This phone number has already contributed to this collection",
+                    code=status.HTTP_400_BAD_REQUEST
+                )
+            else:
+                # Return existing pending contribution with payment link
+                return response(
+                    True,
+                    "You already have a pending contribution. Please complete payment.",
+                    data={
+                        'contributor_id': str(existing_contributor.id),
+                        'payment_reference': existing_contributor.payment_reference,
+                        'amount': float(existing_contributor.amount_owed),
+                        'status': 'pending',
+                        'payment_url': f"{frontend_url}/{collection.slug}/pay/{existing_contributor.payment_reference}"
+                    }
+                )
+        
+        # Generate unique payment reference
+        payment_reference = generate_payment_reference('KTR')
+        
+        # Create contributor record
+        contributor = Contributor.objects.create(
+            collection=collection,
+            name=request.data['name'],
+            phone=request.data['phone'],
+            email=email,
+            amount_owed=amount_to_be_paid,
+            amount_paid=0,
+            payment_status='pending',
+            payment_method='card',  # Will be updated based on actual payment channel
+            payment_reference=payment_reference
+        )
+        
+        # Create transaction record
+        transaction = Transaction.objects.create(
+            collection=collection,
+            contributor=contributor,
+            transaction_type='payment',
+            amount=amount_to_be_paid,
+            status='pending',
+            reference=payment_reference
+        )
+        
+        # Initialize Paystack transaction
+        try:
+            paystack = PaystackService()
+            
+            # Create callback URL
+            callback_url = f"{frontend_url}/{collection.slug}/verify/{payment_reference}"
+            
+            # Create metadata
+            metadata = create_payment_metadata(
+                contributor_name=contributor.name,
+                contributor_phone=contributor.phone,
+                collection_id=str(collection.id),
+                collection_title=collection.title,
+                contributor_id=str(contributor.id)
+            )
+            
+            # Initialize transaction
+            paystack_response = paystack.initialize_transaction(
+                email=email,
+                amount=float(amount_to_be_paid),
+                reference=payment_reference,
+                callback_url=callback_url,
+                metadata=metadata,
+                subaccount=collection.paystack_subaccount if collection.paystack_subaccount else None
+            )
+            
+            # Validate response
+            is_valid, message, paystack_data = validate_paystack_response(paystack_response)
+            
+            if not is_valid:
+                # Delete contributor and transaction if Paystack init failed
+                contributor.delete()
+                transaction.delete()
+                return response(
+                    False,
+                    f"Payment initialization failed: {message}",
+                    code=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            # Store Paystack reference
+            contributor.paystack_reference = paystack_data.get('reference')
+            contributor.save()
+            
+            transaction.paystack_reference = paystack_data.get('reference')
+            transaction.save()
+            
+            # Send email notification to organizer
+            try:
+                send_organizer_notification(
+                    collection, 
+                    contributor, 
+                    amount_to_be_paid, 
+                    payment_reference,
+                    f"{frontend_url}/{collection.slug}/dashboard"
+                )
+            except Exception as email_error:
+                print(f"Email notification failed: {str(email_error)}")
+            
+            # Return payment URL
+            return response(
+                True,
+                "Payment initialized successfully. Proceed to make payment.",
+                data={
+                    'contributor_id': str(contributor.id),
+                    'payment_reference': payment_reference,
+                    'amount': float(amount_to_be_paid),
+                    'payment_url': paystack_data.get('authorization_url'),
+                    'access_code': paystack_data.get('access_code'),
+                    'status': 'pending'
+                },
+                code=status.HTTP_201_CREATED
+            )
+            
+        except Exception as paystack_error:
+            # Cleanup on error
+            contributor.delete()
+            transaction.delete()
+            return response(
+                False,
+                f"Payment service error: {str(paystack_error)}",
+                code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+    except Collection.DoesNotExist:
+        return response(
+            False,
+            "Collection not found",
+            code=status.HTTP_404_NOT_FOUND
+        )
+    
+    except Exception as e:
+        return response(
+            False,
+            "An error occurred while processing your contribution",
+            errors=str(e),
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+def verify_payment(request, reference):
+    """
+    Verify Paystack payment after redirect
+    
+    URL: /api/verify-payment/<reference>/
+    """
+    try:
+        # Get contributor by reference
+        contributor = get_object_or_404(Contributor, payment_reference=reference)
+        collection = contributor.collection
+        
+        # Check if already verified
+        if contributor.payment_status == 'paid':
+            return response(
+                True,
+                "Payment already verified",
+                data={
+                    'status': 'paid',
+                    'contributor_id': str(contributor.id),
+                    'amount_paid': float(contributor.amount_paid),
+                    'paid_at': contributor.paid_at.isoformat() if contributor.paid_at else None
+                }
+            )
+        
+        # Verify with Paystack
+        try:
+            paystack = PaystackService()
+            verification_response = paystack.verify_transaction(reference)
+            
+            is_valid, message, verification_data = validate_paystack_response(verification_response)
+            
+            if not is_valid:
+                return response(
+                    False,
+                    f"Payment verification failed: {message}",
+                    code=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check payment status
+            if verification_data.get('status') == 'success':
+                # Update contributor
+                contributor.payment_status = 'paid'
+                contributor.amount_paid = kobo_to_naira(verification_data.get('amount', 0))
+                contributor.paid_at = timezone.now()
+                contributor.payment_method = verification_data.get('channel', 'card')
+                contributor.verified_by = 'paystack'
+                contributor.verified_at = timezone.now()
+                contributor.save()
+                
+                # Update transaction
+                transaction = Transaction.objects.filter(
+                    contributor=contributor,
+                    reference=reference
+                ).first()
+                
+                if transaction:
+                    transaction.status = 'success'
+                    transaction.paystack_reference = verification_data.get('reference')
+                    transaction.metadata = verification_data
+                    transaction.save()
+                
+                return response(
+                    True,
+                    "Payment verified successfully",
+                    data={
+                        'status': 'paid',
+                        'contributor_id': str(contributor.id),
+                        'contributor_name': contributor.name,
+                        'amount_paid': float(contributor.amount_paid),
+                        'paid_at': contributor.paid_at.isoformat(),
+                        'payment_method': contributor.payment_method,
+                        'collection_title': collection.title
+                    }
+                )
+            else:
+                # Payment failed
+                contributor.payment_status = 'failed'
+                contributor.save()
+                
+                transaction = Transaction.objects.filter(
+                    contributor=contributor,
+                    reference=reference
+                ).first()
+                
+                if transaction:
+                    transaction.status = 'failed'
+                    transaction.metadata = verification_data
+                    transaction.save()
+                
+                return response(
+                    False,
+                    f"Payment failed: {verification_data.get('gateway_response', 'Unknown error')}",
+                    code=status.HTTP_400_BAD_REQUEST
+                )
+                
+        except Exception as paystack_error:
+            return response(
+                False,
+                f"Verification error: {str(paystack_error)}",
+                code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+    except Contributor.DoesNotExist:
+        return response(
+            False,
+            "Payment reference not found",
+            code=status.HTTP_404_NOT_FOUND
+        )
+    
+    except Exception as e:
+        return response(
+            False,
+            "An error occurred during verification",
+            errors=str(e),
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ==================== MANUAL PAYMENT ENDPOINTS (ORIGINAL) ====================
 
 @api_view(["POST"])
 def make_contribution(request, slug):
@@ -151,6 +500,14 @@ def make_contribution(request, slug):
     try:
         # Get collection
         collection = get_object_or_404(Collection, slug=slug)
+        
+        # Verify this is a manual collection
+        if collection.type != 'manual':
+            return response(
+                False,
+                "This collection uses automatic payment. Please use the automatic payment endpoint.",
+                code=status.HTTP_400_BAD_REQUEST
+            )
         
         # Check if collection is still active
         if collection.status != 'active':
@@ -394,6 +751,7 @@ def get_dashboard(request, slug):
                     'id': str(collection.id),
                     'title': collection.title,
                     'slug': collection.slug,
+                    'type': collection.type,
                     'total_amount': float(collection.total_amount),
                     'amount_per_person': float(collection.amount_per_person) if collection.amount_per_person else "Flexible amount",
                     'number_of_people': collection.number_of_people,
@@ -559,20 +917,92 @@ def request_withdrawal(request, slug):
         )
 
 
-# ==================== WEBHOOK ENDPOINT (For Future Paystack Integration) ====================
+# ==================== WEBHOOK ENDPOINT (Paystack Integration) ====================
 
 @csrf_exempt
 @api_view(['POST'])
 def paystack_webhook(request):
     """
-    Paystack webhook handler (for future use)
+    Paystack webhook handler for payment notifications
+    This handles real-time payment updates from Paystack
     """
-    # TODO: Implement Paystack webhook verification and processing
-    return response(
-        True,
-        "Webhook received (not yet implemented)",
-        code=status.HTTP_200_OK
-    )
+    try:
+        # Get raw payload
+        payload = request.body
+        
+        # Get signature from header
+        signature = request.headers.get('X-Paystack-Signature', '')
+        
+        if not signature:
+            return response(
+                False,
+                "No signature found",
+                code=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify webhook signature
+        paystack = PaystackService()
+        if not paystack.verify_webhook_signature(payload, signature):
+            return response(
+                False,
+                "Invalid signature",
+                code=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        # Parse event data
+        event_data = json.loads(payload)
+        event = event_data.get('event')
+        
+        # Parse webhook event
+        parsed_event = parse_paystack_webhook_event(event_data)
+        
+        # Handle charge.success event
+        if event == 'charge.success':
+            reference = parsed_event['reference']
+            
+            # Find contributor by reference
+            try:
+                contributor = Contributor.objects.get(payment_reference=reference)
+            except Contributor.DoesNotExist:
+                # Log this but return 200 to prevent Paystack retries
+                print(f"Webhook: Contributor not found for reference {reference}")
+                return Response({'status': 'success'}, status=status.HTTP_200_OK)
+            
+            # Check if not already paid
+            if contributor.payment_status != 'paid':
+                # Update contributor
+                contributor.payment_status = 'paid'
+                contributor.amount_paid = parsed_event['amount']
+                contributor.paid_at = timezone.now()
+                contributor.payment_method = parsed_event['channel']
+                contributor.verified_by = 'paystack_webhook'
+                contributor.verified_at = timezone.now()
+                contributor.save()
+                
+                # Update transaction
+                transaction = Transaction.objects.filter(
+                    contributor=contributor,
+                    reference=reference
+                ).first()
+                
+                if transaction:
+                    transaction.status = 'success'
+                    transaction.paystack_reference = parsed_event['paystack_reference']
+                    transaction.metadata = event_data.get('data', {})
+                    transaction.save()
+                
+                print(f"Webhook: Payment confirmed for {contributor.name} - {reference}")
+        
+        # Handle other events if needed (transfer.success, transfer.failed, etc.)
+        # Add more event handlers here as needed
+        
+        # Always return 200 OK to Paystack
+        return Response({'status': 'success'}, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        # Log error but still return 200 to prevent webhook retries
+        print(f"Webhook error: {str(e)}")
+        return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_200_OK)
 
 
 # ==================== RECEIPT ENDPOINT ====================
@@ -605,7 +1035,8 @@ def get_receipt(request, contributor_id):
             },
             'collection': {
                 'title': collection.title,
-                'organizer': collection.organizer_name
+                'organizer': collection.organizer_name,
+                'type': collection.type
             },
             'payment': {
                 'amount': float(contributor.amount_paid),

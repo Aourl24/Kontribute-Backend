@@ -135,3 +135,5 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = protect.protect(1)
 EMAIL_HOST_PASSWORD = protect.protect(2)
 DEFAULT_FROM_EMAIL = 'Kontribute.com <kontribute.mail@gmail.com>'
+PAYSTACK_PUBLIC_KEY = protect.protect(4)
+PAYSTACK_SECRET_KEY = protect.protect(3)
