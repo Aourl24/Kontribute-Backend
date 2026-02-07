@@ -70,13 +70,11 @@ def create_collections(request):
                 validated_data['number_of_people']
             )
 
-        organizer_account_number = validated_data.get("organizer_account_number")
         
         collection = Collection.objects.create(
             **validated_data,
             slug=unique_slug,
             status='active',
-            type = "manual" if organizer_account_number else "automatic"
         )
         
         token = collection.generate_magic_token()
