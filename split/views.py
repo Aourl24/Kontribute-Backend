@@ -111,9 +111,7 @@ def get_collection(request, slug):
         serializers = CollectionSerializers(collection)
         
         # Get contribution stats
-        total_collected = collection.contributors.filter(
-            payment_status='paid'
-        ).aggregate(total=Sum('amount_paid'))['total'] or 0
+        total_collected = collection.total_collected
         paid_count = collection.contributors.filter(payment_status='paid').count()
         pending_count = collection.contributors.filter(payment_status='pending').count()
         if collection.total_amount:
